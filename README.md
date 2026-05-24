@@ -2,7 +2,7 @@
 
 ChatLuna 1.4 数据管理台。它在 Koishi Console 中提供一个独立页面，用来查看和维护 ChatLuna 的会话、消息、配置、模型引用、归档和授权数据。
 
-当前版本：`0.7.6`
+当前版本：`0.7.7`
 
 ## 适合谁
 
@@ -98,6 +98,19 @@ Koishi 权限和 ChatLuna ACL 是两套概念。Koishi 权限决定用户在 Koi
 2. 再确认该 Koishi 用户的 `authority` 和 `permissions`。
 3. 群或频道问题再看 `channel.assignee` 和 `channel.permissions`。
 4. 只有 ChatLuna 某个会话不可见时，再检查 ChatLuna 会话 ACL。
+
+也可以直接在平台里使用指令：
+
+```text
+chatluna-data.permission.who <用户ID或平台账号ID>
+chatluna-data.permission.authority <用户ID或平台账号ID> <等级>
+chatluna-data.permission.perm-add <用户ID或平台账号ID> <权限>
+chatluna-data.permission.perm-remove <用户ID或平台账号ID> <权限>
+chatluna-data.permission.channel <频道ID> [assignee] -a <权限>
+chatluna-data.permission.channel <频道ID> -r <权限>
+```
+
+这些指令修改的是 Koishi 原生 `user` 和 `channel` 表，需要调用者具备较高 Koishi 权限。插件开启 `readonly` 时，修改指令会被拒绝。
 
 ### 5. 修改会话和聊天记录
 

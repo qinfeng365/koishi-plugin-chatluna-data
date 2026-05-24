@@ -910,6 +910,67 @@
                                     />
                                 </div>
                             </div>
+                            <div class="permission-auto">
+                                <el-select
+                                    v-model="permPlan.target"
+                                    size="small"
+                                    class="wide"
+                                >
+                                    <el-option label="全部 Koishi 用户" value="all-users" />
+                                    <el-option label="有平台绑定的用户" value="bound-users" />
+                                    <el-option label="ChatLuna 活跃用户" value="chatluna-users" />
+                                    <el-option label="未配置权限用户" value="unconfigured-users" />
+                                    <el-option label="全部频道" value="channels" />
+                                    <el-option label="未设置 assignee 的频道" value="channels-empty" />
+                                </el-select>
+                                <el-select
+                                    v-model="permPlan.permissionMode"
+                                    size="small"
+                                    class="wide"
+                                >
+                                    <el-option label="追加权限" value="add" />
+                                    <el-option label="替换权限" value="replace" />
+                                    <el-option label="移除权限" value="remove" />
+                                </el-select>
+                                <el-select
+                                    v-model="permPlan.permissions"
+                                    multiple
+                                    filterable
+                                    allow-create
+                                    default-first-option
+                                    size="small"
+                                    class="wide"
+                                    placeholder="权限字符串"
+                                >
+                                    <el-option
+                                        v-for="item in permissionChoices"
+                                        :key="item"
+                                        :label="item"
+                                        :value="item"
+                                    />
+                                </el-select>
+                                <el-input-number
+                                    v-model="permPlan.authority"
+                                    :min="0"
+                                    :max="5"
+                                    size="small"
+                                    placeholder="authority"
+                                />
+                                <el-input
+                                    v-model="permPlan.assignee"
+                                    size="small"
+                                    placeholder="频道 assignee"
+                                />
+                                <el-button
+                                    size="small"
+                                    type="primary"
+                                    plain
+                                    :disabled="overview.config.readonly"
+                                    @click="previewKoishiPlan"
+                                >
+                                    预览自动分配
+                                </el-button>
+                            </div>
                             <div class="permission-stats">
                                 <span>用户 {{ perm.totals.users }}</span>
                                 <span>账号绑定 {{ perm.totals.bindings }}</span>
@@ -2581,6 +2642,57 @@
             </template>
         </el-dialog>
 
+        <el-dialog v-model="permPreview.open" title="权限自动分配预览" width="860px">
+            <div class="preview-head">
+                <el-statistic title="影响数量" :value="permPreview.data.count" />
+            </div>
+            <div class="tags warn">
+                <el-tag
+                    v-for="item in permPreview.data.warnings"
+                    :key="item"
+                    type="warning"
+                    effect="plain"
+                >
+                    {{ item }}
+                </el-tag>
+            </div>
+            <el-table :data="permPreview.data.rows" height="360">
+                <el-table-column label="对象" min-width="260">
+                    <template #default="{ row }">
+                        <div class="stack">
+                            <strong>{{ row.name }}</strong>
+                            <code>{{ row.kind }} / {{ row.platform }} / {{ row.id }}</code>
+                        </div>
+                    </template>
+                </el-table-column>
+                <el-table-column label="原因" min-width="220" prop="reason" />
+                <el-table-column label="authority" width="130">
+                    <template #default="{ row }">
+                        {{ row.currentAuthority ?? '-' }} -> {{ row.nextAuthority ?? '-' }}
+                    </template>
+                </el-table-column>
+                <el-table-column label="permissions" min-width="260">
+                    <template #default="{ row }">
+                        <div class="stack">
+                            <span>{{ row.currentPermissions.join(', ') || '-' }}</span>
+                            <strong>{{ row.nextPermissions.join(', ') || '-' }}</strong>
+                        </div>
+                    </template>
+                </el-table-column>
+            </el-table>
+            <template #footer>
+                <el-button @click="permPreview.open = false">取消</el-button>
+                <el-button
+                    type="danger"
+                    :disabled="overview.config.readonly || permPreview.data.count === 0"
+                    :loading="saving"
+                    @click="applyKoishiPlan"
+                >
+                    应用自动分配
+                </el-button>
+            </template>
+        </el-dialog>
+
         <el-dialog v-model="msgBox.open" title="聊天记录" width="760px">
             <el-form label-position="top" :disabled="overview.config.readonly">
                 <div class="form-grid">
@@ -3121,6 +3233,23 @@ const previewBox = reactive({
         rows: [] as Record<string, unknown>[],
         warnings: [] as string[],
         blocked: false
+    }
+})
+
+const permPlan = reactive({
+    target: 'bound-users',
+    permissionMode: 'add',
+    permissions: [] as string[],
+    authority: null as number | null,
+    assignee: ''
+})
+
+const permPreview = reactive({
+    open: false,
+    data: {
+        count: 0,
+        rows: [] as PermissionPlanRow[],
+        warnings: [] as string[]
     }
 })
 
@@ -4184,6 +4313,36 @@ async function saveKoishiChannel(row: PermissionChannel) {
     await loadPermissions()
 }
 
+async function previewKoishiPlan() {
+    const data = await send('chatluna-data/previewKoishiPermissionPlan', {
+        target: permPlan.target,
+        permissionMode: permPlan.permissionMode,
+        permissions: permPlan.permissions,
+        authority: permPlan.authority,
+        assignee: permPlan.assignee || undefined
+    })
+    permPreview.data = data
+    permPreview.open = true
+}
+
+async function applyKoishiPlan() {
+    saving.value = true
+    try {
+        await send('chatluna-data/applyKoishiPermissionPlan', {
+            target: permPlan.target,
+            permissionMode: permPlan.permissionMode,
+            permissions: permPlan.permissions,
+            authority: permPlan.authority,
+            assignee: permPlan.assignee || undefined
+        })
+        permPreview.open = false
+        ElMessage.success('权限自动分配已应用')
+        await loadPermissions()
+    } finally {
+        saving.value = false
+    }
+}
+
 function editRule(row?: Rule) {
     ruleBox.row = row
         ? {
@@ -4731,6 +4890,20 @@ interface PermissionIssue {
     action: string
 }
 
+interface PermissionPlanRow {
+    kind: string
+    id: string | number
+    platform: string
+    name: string
+    reason: string
+    currentAuthority: number | null
+    nextAuthority: number | null
+    currentAssignee: string
+    nextAssignee: string
+    currentPermissions: string[]
+    nextPermissions: string[]
+}
+
 interface Audit {
     id: string
     action: string
@@ -4970,6 +5143,15 @@ dt {
     color: var(--k-text-light);
     background: color-mix(in srgb, var(--k-page-bg), var(--k-side-bg) 36%);
     font-size: 13px;
+}
+
+.permission-auto {
+    display: grid;
+    grid-template-columns: 180px 120px minmax(180px, 1fr) 140px 160px 130px;
+    gap: 10px;
+    padding: 12px 14px;
+    border-bottom: 1px solid
+        color-mix(in srgb, var(--k-color-divider), transparent 34%);
 }
 
 .permission-guide {
@@ -5345,6 +5527,7 @@ code {
     .form-grid,
     .runtime-grid,
     .defaults-grid,
+    .permission-auto,
     .permission-guide,
     .health-strip {
         grid-template-columns: 1fr;

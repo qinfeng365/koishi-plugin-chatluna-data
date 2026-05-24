@@ -92,6 +92,141 @@ export function apply(ctx: Context, cfg: Config) {
         }
     }
 
+    const perm = ctx.command('chatluna-data.permission', {
+        authority: 4
+    })
+
+    perm.subcommand('.who <target:string>')
+        .alias('chatluna-data.perm.who')
+        .action(async ({ session }, target) => {
+            if (!target) return '请输入 Koishi 用户 ID 或平台用户 ID。'
+            const user = await findKoishiUser(ctx, target)
+            if (!user) return `找不到用户：${target}`
+            const bindings = await getRows<KoishiBindingRecord>(ctx, 'binding', {
+                aid: user.id
+            })
+            return [
+                `Koishi 用户：${user.name || user.id}`,
+                `id：${user.id}`,
+                `authority：${user.authority}`,
+                `permissions：${(user.permissions ?? []).join(', ') || '-'}`,
+                `bindings：${
+                    bindings
+                        .map((row) => `${row.platform}:${row.pid}`)
+                        .join(', ') || '-'
+                }`
+            ].join('\n')
+        })
+
+    perm.subcommand('.authority <target:string> <value:number>')
+        .alias('chatluna-data.perm.authority')
+        .action(async ({ session }, target, value) => {
+            if (cfg.readonly) return 'readonly 模式已启用，拒绝修改。'
+            if (!target || value == null) return '用法：authority <用户> <等级>'
+            const user = await findKoishiUser(ctx, target)
+            if (!user) return `找不到用户：${target}`
+            await ctx.database.upsert('user', [
+                {
+                    id: user.id,
+                    authority: value
+                }
+            ])
+            pushAudit('command.koishi-user.authority', String(user.id), [], {
+                operator: session.userId,
+                value
+            })
+            return `已设置 ${user.name || user.id} 的 authority 为 ${value}。`
+        })
+
+    perm.subcommand('.perm-add <target:string> <permission:string>')
+        .alias('chatluna-data.perm.add')
+        .action(async ({ session }, target, permission) => {
+            if (cfg.readonly) return 'readonly 模式已启用，拒绝修改。'
+            if (!target || !permission) {
+                return '用法：perm-add <用户> <权限字符串>'
+            }
+            const user = await findKoishiUser(ctx, target)
+            if (!user) return `找不到用户：${target}`
+            await ctx.database.upsert('user', [
+                {
+                    id: user.id,
+                    permissions: Array.from(
+                        new Set([...(user.permissions ?? []), permission])
+                    )
+                }
+            ])
+            pushAudit('command.koishi-user.permission-add', String(user.id), [], {
+                operator: session.userId,
+                permission
+            })
+            return `已为 ${user.name || user.id} 添加权限 ${permission}。`
+        })
+
+    perm.subcommand('.perm-remove <target:string> <permission:string>')
+        .alias('chatluna-data.perm.remove')
+        .action(async ({ session }, target, permission) => {
+            if (cfg.readonly) return 'readonly 模式已启用，拒绝修改。'
+            if (!target || !permission) {
+                return '用法：perm-remove <用户> <权限字符串>'
+            }
+            const user = await findKoishiUser(ctx, target)
+            if (!user) return `找不到用户：${target}`
+            await ctx.database.upsert('user', [
+                {
+                    id: user.id,
+                    permissions: (user.permissions ?? []).filter(
+                        (item) => item !== permission
+                    )
+                }
+            ])
+            pushAudit(
+                'command.koishi-user.permission-remove',
+                String(user.id),
+                [],
+                {
+                    operator: session.userId,
+                    permission
+                }
+            )
+            return `已移除 ${user.name || user.id} 的权限 ${permission}。`
+        })
+
+    perm.subcommand('.channel <channel:string> [assignee:string]')
+        .alias('chatluna-data.perm.channel')
+        .option('add', '-a <permission:string>')
+        .option('remove', '-r <permission:string>')
+        .action(async ({ session, options }, channel, assignee) => {
+            if (cfg.readonly) return 'readonly 模式已启用，拒绝修改。'
+            if (!channel) return '用法：channel <频道 ID> [assignee]'
+            const [row] = await ctx.database.get('channel', { id: channel })
+            if (!row) return `找不到频道：${channel}`
+            const current = row.permissions ?? []
+            const permissions = options.add
+                ? Array.from(new Set([...current, options.add]))
+                : options.remove
+                  ? current.filter((item) => item !== options.remove)
+                  : current
+            await ctx.database.upsert('channel', [
+                {
+                    id: row.id,
+                    platform: row.platform,
+                    assignee: assignee ?? row.assignee,
+                    permissions
+                }
+            ])
+            pushAudit('command.koishi-channel.permission', row.id, [], {
+                operator: session.userId,
+                assignee,
+                add: options.add,
+                remove: options.remove
+            })
+            return [
+                `已更新频道 ${row.platform}:${row.id}`,
+                `assignee：${(assignee ?? row.assignee) || '-'}`,
+                `permissions：${permissions.join(', ') || '-'}`
+            ].join('\n')
+        })
+
     ctx.model.extend(
         'chatluna_conversation',
         {
@@ -1218,6 +1353,49 @@ export function apply(ctx: Context, cfg: Config) {
     )
 
     ctx.console.addListener(
+        'chatluna-data/previewKoishiPermissionPlan',
+        async (input: KoishiPermissionPlanInput) =>
+            previewKoishiPermissionPlan(ctx, cfg, input),
+        { authority: 3 }
+    )
+
+    ctx.console.addListener(
+        'chatluna-data/applyKoishiPermissionPlan',
+        async (input: KoishiPermissionPlanInput) => {
+            if (cfg.readonly) throw new Error('readonly mode enabled')
+            const plan = await previewKoishiPermissionPlan(ctx, cfg, input)
+            if (input.target === 'channels' || input.target === 'channels-empty') {
+                await ctx.database.upsert(
+                    'channel',
+                    plan.allRows.map((row) => ({
+                        id: String(row.id),
+                        platform: row.platform,
+                        assignee: row.nextAssignee,
+                        permissions: row.nextPermissions
+                    }))
+                )
+            } else {
+                await ctx.database.upsert(
+                    'user',
+                    plan.allRows.map((row) => ({
+                        id: Number(row.id),
+                        authority: row.nextAuthority,
+                        permissions: row.nextPermissions
+                    }))
+                )
+            }
+            pushAudit(
+                'koishi-permission.apply',
+                input.target,
+                plan.allRows.map((row) => String(row.id)),
+                input
+            )
+            return { ok: true, count: plan.count }
+        },
+        { authority: 3 }
+    )
+
+    ctx.console.addListener(
         'chatluna-data/saveAcl',
         async (input: SaveAclInput) => {
             if (cfg.readonly) throw new Error('readonly mode enabled')
@@ -1468,6 +1646,157 @@ export function apply(ctx: Context, cfg: Config) {
 
 async function getRows<T>(ctx: Context, table: string, query = {}) {
     return (await ctx.database.get(table as never, query as never)) as T[]
+}
+
+async function previewKoishiPermissionPlan(
+    ctx: Context,
+    cfg: Config,
+    input: KoishiPermissionPlanInput
+) {
+    const [users, kBindings, channels, convs] = await Promise.all([
+        getRows<KoishiUserRecord>(ctx, 'user'),
+        getRows<KoishiBindingRecord>(ctx, 'binding'),
+        getRows<KoishiChannelRecord>(ctx, 'channel'),
+        getRows<ConversationRecord>(ctx, 'chatluna_conversation')
+    ])
+    const bindingsByAid = new Map<number, KoishiBindingRecord[]>()
+    const chatUsers = new Set<string>()
+    const chatGuilds = new Set<string>()
+    for (const row of kBindings) {
+        bindingsByAid.set(row.aid, [
+            ...(bindingsByAid.get(row.aid) ?? []),
+            row
+        ])
+    }
+    for (const conv of convs) {
+        const route = parseBindingKey(conv.bindingKey)
+        if (conv.createdBy) chatUsers.add(conv.createdBy)
+        if (route.userId) chatUsers.add(route.userId)
+        if (route.guildId) chatGuilds.add(route.guildId)
+    }
+    const perms = input.permissions ?? []
+    const rows =
+        input.target === 'channels' || input.target === 'channels-empty'
+            ? channels
+                  .filter((row) => !input.platform || row.platform === input.platform)
+                  .filter(
+                      (row) =>
+                          input.target === 'channels' ||
+                          !row.assignee ||
+                          chatGuilds.has(row.id)
+                  )
+                  .map((row) => {
+                      const current = row.permissions ?? []
+                      const next =
+                          input.permissionMode === 'replace'
+                              ? perms
+                              : input.permissionMode === 'remove'
+                                ? current.filter((item) => !perms.includes(item))
+                                : Array.from(new Set([...current, ...perms]))
+                      return {
+                          kind: 'channel',
+                          id: row.id,
+                          platform: row.platform,
+                          name: row.guildId || row.id,
+                          reason: row.assignee
+                              ? '匹配频道筛选条件'
+                              : '频道未设置 assignee',
+                          currentAuthority: null,
+                          nextAuthority: null,
+                          currentAssignee: row.assignee,
+                          nextAssignee: input.assignee ?? row.assignee,
+                          currentPermissions: current,
+                          nextPermissions: next
+                      }
+                  })
+            : users
+                  .filter((row) => {
+                      const refs = bindingsByAid.get(row.id) ?? []
+                      if (
+                          input.platform &&
+                          !refs.some((item) => item.platform === input.platform)
+                      ) {
+                          return false
+                      }
+                      if (input.target === 'all-users') return true
+                      if (input.target === 'bound-users') return refs.length > 0
+                      if (input.target === 'chatluna-users') {
+                          return refs.some((item) => chatUsers.has(item.pid))
+                      }
+                      return (
+                          row.authority === 0 &&
+                          (row.permissions ?? []).length === 0
+                      )
+                  })
+                  .map((row) => {
+                      const current = row.permissions ?? []
+                      const next =
+                          input.permissionMode === 'replace'
+                              ? perms
+                              : input.permissionMode === 'remove'
+                                ? current.filter((item) => !perms.includes(item))
+                                : Array.from(new Set([...current, ...perms]))
+                      return {
+                          kind: 'user',
+                          id: row.id,
+                          platform:
+                              (bindingsByAid.get(row.id) ?? [])
+                                  .map((item) => item.platform)
+                                  .join(', ') || '-',
+                          name: row.name || `用户 ${row.id}`,
+                          reason:
+                              input.target === 'chatluna-users'
+                                  ? '平台账号出现在 ChatLuna 会话中'
+                                  : input.target === 'bound-users'
+                                    ? '存在平台账号绑定'
+                                    : input.target === 'unconfigured-users'
+                                      ? 'authority 与 permissions 均为空'
+                                      : '匹配全部 Koishi 用户',
+                          currentAuthority: row.authority,
+                          nextAuthority:
+                              input.authority == null
+                                  ? row.authority
+                                  : input.authority,
+                          currentAssignee: '',
+                          nextAssignee: '',
+                          currentPermissions: current,
+                          nextPermissions: next
+                      }
+                  })
+    const changed = rows.filter(
+        (row) =>
+            row.currentAuthority !== row.nextAuthority ||
+            row.currentAssignee !== row.nextAssignee ||
+            row.currentPermissions.join('\n') !==
+                row.nextPermissions.join('\n')
+    )
+    return {
+        count: changed.length,
+        rows: changed.slice(0, cfg.maxPreviewRows),
+        allRows: changed,
+        warnings: [
+            '这是 Koishi 原生 user/channel 权限批量修改。',
+            '请先确认预览对象，应用后会立即写入数据库。'
+        ]
+    }
+}
+
+async function findKoishiUser(ctx: Context, target: string) {
+    if (/^\d+$/.test(target)) {
+        const [user] = await ctx.database.get('user', { id: Number(target) })
+        if (user) return user as KoishiUserRecord
+    }
+    const [binding] = await ctx.database.get('binding', { pid: target })
+    if (binding) {
+        const [user] = await ctx.database.get('user', { id: binding.aid })
+        if (user) return user as KoishiUserRecord
+    }
+    const users = await getRows<KoishiUserRecord>(ctx, 'user')
+    return (
+        users.find((row) => row.name === target) ??
+        users.find((row) => row.name?.includes(target)) ??
+        null
+    )
 }
 
 async function overview(
@@ -2844,6 +3173,21 @@ interface SaveKoishiChannelInput {
     permissions?: string | string[] | null
 }
 
+interface KoishiPermissionPlanInput {
+    target:
+        | 'all-users'
+        | 'bound-users'
+        | 'chatluna-users'
+        | 'unconfigured-users'
+        | 'channels'
+        | 'channels-empty'
+    platform?: string
+    authority?: number | null
+    permissionMode: 'add' | 'replace' | 'remove'
+    permissions?: string[]
+    assignee?: string
+}
+
 interface SaveConstraintInput {
     mode: 'save' | 'remove'
     row: ConstraintRecord & { createdAt?: string; updatedAt?: string }
@@ -3298,6 +3642,12 @@ declare module '@koishijs/console' {
         ) => Promise<unknown>
         'chatluna-data/saveKoishiChannelPermission': (
             input: SaveKoishiChannelInput
+        ) => Promise<unknown>
+        'chatluna-data/previewKoishiPermissionPlan': (
+            input: KoishiPermissionPlanInput
+        ) => Promise<unknown>
+        'chatluna-data/applyKoishiPermissionPlan': (
+            input: KoishiPermissionPlanInput
         ) => Promise<unknown>
         'chatluna-data/saveAcl': (input: SaveAclInput) => Promise<unknown>
         'chatluna-data/assignConversation': (

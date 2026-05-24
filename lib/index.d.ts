@@ -108,6 +108,14 @@ interface SaveKoishiChannelInput {
     assignee: string;
     permissions?: string | string[] | null;
 }
+interface KoishiPermissionPlanInput {
+    target: 'all-users' | 'bound-users' | 'chatluna-users' | 'unconfigured-users' | 'channels' | 'channels-empty';
+    platform?: string;
+    authority?: number | null;
+    permissionMode: 'add' | 'replace' | 'remove';
+    permissions?: string[];
+    assignee?: string;
+}
 interface SaveConstraintInput {
     mode: 'save' | 'remove';
     row: ConstraintRecord & {
@@ -310,6 +318,8 @@ declare module '@koishijs/console' {
         'chatluna-data/getPermissionOverview': () => Promise<unknown>;
         'chatluna-data/saveKoishiUserPermission': (input: SaveKoishiUserInput) => Promise<unknown>;
         'chatluna-data/saveKoishiChannelPermission': (input: SaveKoishiChannelInput) => Promise<unknown>;
+        'chatluna-data/previewKoishiPermissionPlan': (input: KoishiPermissionPlanInput) => Promise<unknown>;
+        'chatluna-data/applyKoishiPermissionPlan': (input: KoishiPermissionPlanInput) => Promise<unknown>;
         'chatluna-data/saveAcl': (input: SaveAclInput) => Promise<unknown>;
         'chatluna-data/assignConversation': (input: AssignConversationInput) => Promise<unknown>;
         'chatluna-data/listConstraints': (input?: ListInput) => Promise<unknown>;
