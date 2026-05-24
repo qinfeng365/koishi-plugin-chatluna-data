@@ -1,0 +1,5 @@
+node_modules/
+tsconfig.tsbuildinfo
+*.tgz
+npm-debug.log*
+yarn-error.log*

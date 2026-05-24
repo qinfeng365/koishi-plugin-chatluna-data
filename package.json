@@ -1,0 +1,76 @@
+{
+    "name": "koishi-plugin-chatluna-data",
+    "description": "ChatLuna 1.4 数据库优先的 Koishi 管理台",
+    "version": "0.7.1",
+    "homepage": "https://github.com/qinfeng365/koishi-plugin-chatluna-data#readme",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/qinfeng365/koishi-plugin-chatluna-data.git"
+    },
+    "bugs": {
+        "url": "https://github.com/qinfeng365/koishi-plugin-chatluna-data/issues"
+    },
+    "main": "lib/index.cjs",
+    "module": "lib/index.mjs",
+    "typings": "lib/index.d.ts",
+    "files": [
+        "lib",
+        "dist"
+    ],
+    "exports": {
+        ".": {
+            "types": "./lib/index.d.ts",
+            "import": "./lib/index.mjs",
+            "require": "./lib/index.cjs"
+        },
+        "./package.json": "./package.json"
+    },
+    "type": "module",
+    "license": "AGPL-3.0",
+    "scripts": {
+        "build": "yarn build:server && yarn build:console",
+        "build:server": "tsc -b && esbuild src/index.ts --bundle --platform=node --format=esm --outfile=lib/index.mjs --external:koishi --external:@koishijs/plugin-console && esbuild src/index.ts --bundle --platform=node --format=cjs --outfile=lib/index.cjs --external:koishi --external:@koishijs/plugin-console",
+        "build:console": "koishi-console build"
+    },
+    "keywords": [
+        "koishi",
+        "chatluna",
+        "database",
+        "conversation",
+        "provider",
+        "adapter",
+        "preset",
+        "runtime",
+        "audit",
+        "health"
+    ],
+    "peerDependencies": {
+        "@koishijs/plugin-console": "^5.30.9",
+        "koishi": "^4.18.9"
+    },
+    "devDependencies": {
+        "@element-plus/icons-vue": "^2.3.2",
+        "@koishijs/client": "^5.30.9",
+        "@koishijs/plugin-console": "^5.30.9",
+        "@types/node": "^22.18.7",
+        "atsc": "^2.1.0",
+        "esbuild": "^0.25.10",
+        "koishi": "^4.18.9",
+        "typescript": "^5.9.2"
+    },
+    "koishi": {
+        "description": {
+            "zh": "ChatLuna 1.4 数据库优先的生产级管理台",
+            "en": "Production ChatLuna 1.4 database-first management console"
+        },
+        "service": {
+            "required": [
+                "database",
+                "console"
+            ],
+            "optional": [
+                "chatluna"
+            ]
+        }
+    }
+}
