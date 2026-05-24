@@ -1129,21 +1129,24 @@ export function apply(ctx: Context, cfg: Config) {
     ctx.console.addListener(
         'chatluna-data/getPermissionOverview',
         async () => {
-            const [users, kBindings, channels, convs, acls, rules] =
+            const [users, kBindings, channels, convs, msgs, acls, rules] =
                 await Promise.all([
                     getRows<KoishiUserRecord>(ctx, 'user'),
                     getRows<KoishiBindingRecord>(ctx, 'binding'),
                     getRows<KoishiChannelRecord>(ctx, 'channel'),
                     getRows<ConversationRecord>(ctx, 'chatluna_conversation'),
+                    getRows<MessageRecord>(ctx, 'chatluna_message'),
                     getRows<AclRecord>(ctx, 'chatluna_acl'),
                     getRows<ConstraintRecord>(ctx, 'chatluna_constraint')
                 ])
             const userById = new Map(users.map((row) => [row.id, row]))
             const bindingsByAid = new Map<number, KoishiBindingRecord[]>()
             const convCountByPrincipal = new Map<string, number>()
+            const lastActiveByPrincipal = new Map<string, Date>()
             const aclCountByPrincipal = new Map<string, number>()
             const ruleCountByPrincipal = new Map<string, number>()
             const convCountByGuild = new Map<string, number>()
+            const nameHints = new Map<string, string>()
 
             for (const row of kBindings) {
                 bindingsByAid.set(row.aid, [
@@ -1159,12 +1162,26 @@ export function apply(ctx: Context, cfg: Config) {
                         id,
                         (convCountByPrincipal.get(id) ?? 0) + 1
                     )
+                    const t = conv.lastChatAt ?? conv.updatedAt ?? conv.createdAt
+                    if (timeOf(t) > timeOf(lastActiveByPrincipal.get(id))) {
+                        lastActiveByPrincipal.set(id, t)
+                    }
                 }
                 if (route.guildId) {
                     convCountByGuild.set(
                         route.guildId,
                         (convCountByGuild.get(route.guildId) ?? 0) + 1
                     )
+                }
+            }
+            const convById = new Map(convs.map((row) => [row.id, row]))
+            for (const msg of msgs) {
+                if (!msg.name || msg.role !== 'human') continue
+                const conv = convById.get(msg.conversationId)
+                if (!conv) continue
+                const route = parseBindingKey(conv.bindingKey)
+                for (const id of new Set([conv.createdBy, route.userId])) {
+                    if (id && !nameHints.has(id)) nameHints.set(id, msg.name)
                 }
             }
             for (const acl of acls) {
@@ -1189,12 +1206,33 @@ export function apply(ctx: Context, cfg: Config) {
             const userRows = users.map((row) => {
                 const refs = bindingsByAid.get(row.id) ?? []
                 const ids = refs.map((item) => item.pid)
+                const display =
+                    row.name ||
+                    ids.map((id) => nameHints.get(id)).find(Boolean) ||
+                    ids[0] ||
+                    `用户 ${row.id}`
+                const last = ids
+                    .map((id) => lastActiveByPrincipal.get(id))
+                    .filter(Boolean)
+                    .sort((a, b) => timeOf(b) - timeOf(a))[0]
                 return {
                     id: row.id,
                     name: row.name,
+                    displayName: display,
+                    nameSource: row.name
+                        ? 'koishi'
+                        : ids.some((id) => nameHints.has(id))
+                          ? 'chatluna'
+                          : ids.length > 0
+                            ? 'binding'
+                            : 'fallback',
                     authority: row.authority,
                     permissions: row.permissions ?? [],
                     createdAt: iso(row.createdAt),
+                    lastActiveAt: iso(last),
+                    inactiveDays: last
+                        ? Math.floor((Date.now() - timeOf(last)) / 86400000)
+                        : null,
                     bindings: refs.length,
                     platforms: Array.from(
                         new Set(refs.map((item) => item.platform))
@@ -1226,7 +1264,7 @@ export function apply(ctx: Context, cfg: Config) {
                     .map((row) => ({
                         level: 'warning' as const,
                         type: 'high-authority',
-                        target: row.name || String(row.id),
+                        target: row.displayName,
                         message: `用户 authority=${row.authority}`,
                         action: '确认是否需要保留高权限。'
                     })),
@@ -1238,6 +1276,20 @@ export function apply(ctx: Context, cfg: Config) {
                         target: row.name || String(row.id),
                         message: 'Koishi 用户没有平台账号绑定。',
                         action: '如果这是历史用户，可以保留；否则检查 binding 表。'
+                    })),
+                ...userRows
+                    .filter(
+                        (row) =>
+                            row.inactiveDays != null &&
+                            row.inactiveDays >= 180 &&
+                            row.authority > 0
+                    )
+                    .map((row) => ({
+                        level: 'warning' as const,
+                        type: 'inactive-user',
+                        target: row.displayName,
+                        message: `超过 ${row.inactiveDays} 天未活跃。`,
+                        action: '检查是否需要降权或移除细粒度权限。'
                     })),
                 ...kBindings
                     .filter((row) => !userById.has(row.aid))

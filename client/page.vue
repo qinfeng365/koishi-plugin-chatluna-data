@@ -977,6 +977,7 @@
                                 <span>频道 {{ perm.totals.channels }}</span>
                                 <span>ChatLuna ACL {{ perm.totals.acl }}</span>
                                 <span>提示 {{ perm.totals.issues }}</span>
+                                <span>180 天未活跃 {{ inactiveUsers.length }}</span>
                             </div>
                             <div class="permission-guide">
                                 <div>
@@ -1037,7 +1038,16 @@
                                     <template #default="{ row }">
                                         <div class="stack">
                                             <strong>{{ row.name || `用户 ${row.id}` }}</strong>
-                                            <code>{{ row.id }}</code>
+                                            <span>{{ row.displayName }}</span>
+                                            <code>{{ row.platforms.join(', ') || '-' }} / {{ row.principals.join(', ') || row.id }}</code>
+                                        </div>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="活跃" width="150">
+                                    <template #default="{ row }">
+                                        <div class="stack">
+                                            <strong>{{ row.inactiveDays == null ? '-' : `${row.inactiveDays} 天前` }}</strong>
+                                            <span>{{ shortTime(row.lastActiveAt) }}</span>
                                         </div>
                                     </template>
                                 </el-table-column>
@@ -3348,7 +3358,10 @@ const filteredPermUsers = computed(() => {
         [
             row.id,
             row.name,
+            row.displayName,
+            row.nameSource,
             row.authority,
+            row.lastActiveAt,
             row.permissions.join('\n'),
             row.principals.join('\n'),
             row.platforms.join('\n')
@@ -3358,6 +3371,11 @@ const filteredPermUsers = computed(() => {
             .includes(q)
     )
 })
+const inactiveUsers = computed(() =>
+    perm.users.filter(
+        (row) => row.inactiveDays != null && row.inactiveDays >= 180
+    )
+)
 const pagedPermIssues = computed(() =>
     perm.issues.slice(
         (perm.issuePage - 1) * perm.pageSize,
@@ -4850,9 +4868,13 @@ interface KoishiChannel {
 interface PermissionUser {
     id: number
     name: string
+    displayName: string
+    nameSource: string
     authority: number
     permissions: string[]
     createdAt: string
+    lastActiveAt: string
+    inactiveDays: number | null
     bindings: number
     platforms: string[]
     principals: string[]

@@ -2,7 +2,7 @@
 
 ChatLuna 1.4 数据管理台。它在 Koishi Console 中提供一个独立页面，用来查看和维护 ChatLuna 的会话、消息、配置、模型引用、归档和授权数据。
 
-当前版本：`0.7.7`
+当前版本：`0.7.8`
 
 ## 适合谁
 
@@ -91,6 +91,16 @@ Koishi 权限和 ChatLuna ACL 是两套概念。Koishi 权限决定用户在 Koi
 - 有权限但没有平台账号绑定的用户：检查是否是历史用户。
 - 指向缺失用户的 binding：检查 `binding` 表或恢复对应用户。
 - 没有 assignee 的频道：需要定向机器人受理时再填写。
+- 长期未活跃用户：根据 ChatLuna 会话的 `lastChatAt/updatedAt` 计算。
+
+用户显示名的来源顺序：
+
+1. Koishi `user.name`
+2. ChatLuna 消息里的 human message `name`
+3. Koishi `binding.pid`
+4. Koishi 用户 ID
+
+插件不会在打开权限页时自动请求 QQ 或其他平台 API。外部资料刷新应手动触发，否则容易导致权限页卡顿、触发平台限流，或在不知情时暴露用户查询行为。
 
 常用排查顺序：
 
