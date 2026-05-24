@@ -906,6 +906,7 @@
                                         clearable
                                         size="small"
                                         placeholder="搜索用户 / 账号 / 权限"
+                                        @input="resetPermissionPages"
                                     />
                                 </div>
                             </div>
@@ -934,7 +935,7 @@
                                     <span>频道受理者和频道权限，不等同于 ChatLuna 会话 ACL。</span>
                                 </div>
                             </div>
-                            <el-table :data="perm.issues" height="220">
+                            <el-table :data="pagedPermIssues" height="220">
                                 <el-table-column label="权限提示" min-width="260">
                                     <template #default="{ row }">
                                         <div class="stack">
@@ -960,7 +961,17 @@
                                     min-width="260"
                                 />
                             </el-table>
-                            <el-table :data="filteredPermUsers" height="420">
+                            <div class="pager compact">
+                                <el-pagination
+                                    v-model:current-page="perm.issuePage"
+                                    background
+                                    small
+                                    layout="prev, pager, next, total"
+                                    :page-size="perm.pageSize"
+                                    :total="perm.issues.length"
+                                />
+                            </div>
+                            <el-table :data="pagedPermUsers" height="420">
                                 <el-table-column label="用户" min-width="220">
                                     <template #default="{ row }">
                                         <div class="stack">
@@ -1022,6 +1033,16 @@
                                     </template>
                                 </el-table-column>
                             </el-table>
+                            <div class="pager compact">
+                                <el-pagination
+                                    v-model:current-page="perm.userPage"
+                                    background
+                                    small
+                                    layout="prev, pager, next, total"
+                                    :page-size="perm.pageSize"
+                                    :total="filteredPermUsers.length"
+                                />
+                            </div>
                         </section>
 
                         <section class="panel">
@@ -1033,7 +1054,7 @@
                                     </p>
                                 </div>
                             </div>
-                            <el-table :data="filteredBindings" height="300">
+                            <el-table :data="pagedBindings" height="300">
                                 <el-table-column label="平台账号" min-width="260">
                                     <template #default="{ row }">
                                         <div class="stack">
@@ -1056,6 +1077,16 @@
                                     </template>
                                 </el-table-column>
                             </el-table>
+                            <div class="pager compact">
+                                <el-pagination
+                                    v-model:current-page="perm.bindingPage"
+                                    background
+                                    small
+                                    layout="prev, pager, next, total"
+                                    :page-size="perm.pageSize"
+                                    :total="filteredBindings.length"
+                                />
+                            </div>
                         </section>
 
                         <section class="panel">
@@ -1067,7 +1098,7 @@
                                     </p>
                                 </div>
                             </div>
-                            <el-table :data="filteredChannels" height="340">
+                            <el-table :data="pagedChannels" height="340">
                                 <el-table-column label="频道" min-width="260">
                                     <template #default="{ row }">
                                         <div class="stack">
@@ -1121,6 +1152,16 @@
                                     </template>
                                 </el-table-column>
                             </el-table>
+                            <div class="pager compact">
+                                <el-pagination
+                                    v-model:current-page="perm.channelPage"
+                                    background
+                                    small
+                                    layout="prev, pager, next, total"
+                                    :page-size="perm.pageSize"
+                                    :total="filteredChannels.length"
+                                />
+                            </div>
                         </section>
 
                         <section class="panel">
@@ -2973,6 +3014,12 @@ const messages = reactive({
 })
 const perm = reactive({
     query: '',
+    pageSize: 30,
+    userPage: 1,
+    bindingPage: 1,
+    channelPage: 1,
+    issuePage: 1,
+    loaded: false,
     totals: {
         users: 0,
         bindings: 0,
@@ -3182,6 +3229,18 @@ const filteredPermUsers = computed(() => {
             .includes(q)
     )
 })
+const pagedPermIssues = computed(() =>
+    perm.issues.slice(
+        (perm.issuePage - 1) * perm.pageSize,
+        perm.issuePage * perm.pageSize
+    )
+)
+const pagedPermUsers = computed(() =>
+    filteredPermUsers.value.slice(
+        (perm.userPage - 1) * perm.pageSize,
+        perm.userPage * perm.pageSize
+    )
+)
 const filteredBindings = computed(() => {
     const q = perm.query.trim().toLowerCase()
     if (!q) return perm.bindings
@@ -3200,6 +3259,12 @@ const filteredBindings = computed(() => {
             .includes(q)
     )
 })
+const pagedBindings = computed(() =>
+    filteredBindings.value.slice(
+        (perm.bindingPage - 1) * perm.pageSize,
+        perm.bindingPage * perm.pageSize
+    )
+)
 const filteredChannels = computed(() => {
     const q = perm.query.trim().toLowerCase()
     if (!q) return perm.channels
@@ -3216,6 +3281,12 @@ const filteredChannels = computed(() => {
             .includes(q)
     )
 })
+const pagedChannels = computed(() =>
+    filteredChannels.value.slice(
+        (perm.channelPage - 1) * perm.pageSize,
+        perm.channelPage * perm.pageSize
+    )
+)
 const resourceJson = computed(() =>
     JSON.stringify(resourceDetail.value?.details ?? {}, null, 2)
 )
@@ -3596,6 +3667,15 @@ watch(
     }
 )
 
+watch(
+    () => active.value,
+    (tab) => {
+        if (tab === 'permissions' && !perm.loaded) {
+            void Promise.all([loadPermissions(), loadAcl(acl.page)])
+        }
+    }
+)
+
 function goHome() {
     router.push('/')
 }
@@ -3611,8 +3691,9 @@ async function refresh() {
             loadUsers(users.page),
             loadConversations(convs.page),
             loadMessages(messages.page),
-            loadPermissions(),
-            loadAcl(acl.page),
+            active.value === 'permissions'
+                ? Promise.all([loadPermissions(), loadAcl(acl.page)])
+                : Promise.resolve(),
             loadRules(rules.page),
             loadArchives(archives.page),
             loadConfig(),
@@ -3706,6 +3787,14 @@ async function loadPermissions() {
     perm.users = data.users
     perm.bindings = data.bindings
     perm.channels = data.channels
+    perm.loaded = true
+}
+
+function resetPermissionPages() {
+    perm.userPage = 1
+    perm.bindingPage = 1
+    perm.channelPage = 1
+    perm.issuePage = 1
 }
 
 async function loadAcl(page = 1) {

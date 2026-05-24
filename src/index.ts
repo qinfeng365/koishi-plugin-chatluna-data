@@ -1003,14 +1003,57 @@ export function apply(ctx: Context, cfg: Config) {
                     getRows<AclRecord>(ctx, 'chatluna_acl'),
                     getRows<ConstraintRecord>(ctx, 'chatluna_constraint')
                 ])
-            const userRows = users.map((row) => {
-                const refs = kBindings.filter((item) => item.aid === row.id)
-                const ids = refs.map((item) => item.pid)
-                const rows = convs.filter(
-                    (conv) =>
-                        ids.includes(conv.createdBy) ||
-                        ids.some((id) => conv.bindingKey.includes(id))
+            const userById = new Map(users.map((row) => [row.id, row]))
+            const bindingsByAid = new Map<number, KoishiBindingRecord[]>()
+            const convCountByPrincipal = new Map<string, number>()
+            const aclCountByPrincipal = new Map<string, number>()
+            const ruleCountByPrincipal = new Map<string, number>()
+            const convCountByGuild = new Map<string, number>()
+
+            for (const row of kBindings) {
+                bindingsByAid.set(row.aid, [
+                    ...(bindingsByAid.get(row.aid) ?? []),
+                    row
+                ])
+            }
+            for (const conv of convs) {
+                const route = parseBindingKey(conv.bindingKey)
+                for (const id of new Set([conv.createdBy, route.userId])) {
+                    if (!id) continue
+                    convCountByPrincipal.set(
+                        id,
+                        (convCountByPrincipal.get(id) ?? 0) + 1
+                    )
+                }
+                if (route.guildId) {
+                    convCountByGuild.set(
+                        route.guildId,
+                        (convCountByGuild.get(route.guildId) ?? 0) + 1
+                    )
+                }
+            }
+            for (const acl of acls) {
+                aclCountByPrincipal.set(
+                    acl.principalId,
+                    (aclCountByPrincipal.get(acl.principalId) ?? 0) + 1
                 )
+            }
+            for (const rule of rules) {
+                for (const id of new Set([
+                    rule.createdBy,
+                    ...readUserList(rule.users),
+                    ...readUserList(rule.excludeUsers)
+                ])) {
+                    if (!id) continue
+                    ruleCountByPrincipal.set(
+                        id,
+                        (ruleCountByPrincipal.get(id) ?? 0) + 1
+                    )
+                }
+            }
+            const userRows = users.map((row) => {
+                const refs = bindingsByAid.get(row.id) ?? []
+                const ids = refs.map((item) => item.pid)
                 return {
                     id: row.id,
                     name: row.name,
@@ -1022,18 +1065,18 @@ export function apply(ctx: Context, cfg: Config) {
                         new Set(refs.map((item) => item.platform))
                     ),
                     principals: ids,
-                    conversations: rows.length,
-                    acl: acls.filter((acl) => ids.includes(acl.principalId))
-                        .length,
-                    constraints: rules.filter((rule) =>
-                        ids.some((id) =>
-                            [
-                                ...readUserList(rule.users),
-                                ...readUserList(rule.excludeUsers),
-                                rule.createdBy
-                            ].includes(id)
-                        )
-                    ).length
+                    conversations: ids.reduce(
+                        (sum, id) => sum + (convCountByPrincipal.get(id) ?? 0),
+                        0
+                    ),
+                    acl: ids.reduce(
+                        (sum, id) => sum + (aclCountByPrincipal.get(id) ?? 0),
+                        0
+                    ),
+                    constraints: ids.reduce(
+                        (sum, id) => sum + (ruleCountByPrincipal.get(id) ?? 0),
+                        0
+                    )
                 }
             })
             const perms = Array.from(
@@ -1062,7 +1105,7 @@ export function apply(ctx: Context, cfg: Config) {
                         action: '如果这是历史用户，可以保留；否则检查 binding 表。'
                     })),
                 ...kBindings
-                    .filter((row) => !users.some((user) => user.id === row.aid))
+                    .filter((row) => !userById.has(row.aid))
                     .map((row) => ({
                         level: 'warning' as const,
                         type: 'dangling-binding',
@@ -1098,11 +1141,11 @@ export function apply(ctx: Context, cfg: Config) {
                     issues: issues.length
                 },
                 permissions: perms,
-                issues,
+                issues: issues.slice(0, cfg.maxPreviewRows),
                 users: userRows.sort((a, b) => b.authority - a.authority),
                 bindings: kBindings
                     .map((row) => {
-                        const user = users.find((item) => item.id === row.aid)
+                        const user = userById.get(row.aid)
                         return {
                             aid: row.aid,
                             bid: row.bid,
@@ -1110,7 +1153,7 @@ export function apply(ctx: Context, cfg: Config) {
                             platform: row.platform,
                             userName: user?.name ?? '',
                             authority: user?.authority ?? 0,
-                            permissions: user?.permissions ?? []
+                        permissions: user?.permissions ?? []
                         }
                     })
                     .sort((a, b) =>
@@ -1126,14 +1169,8 @@ export function apply(ctx: Context, cfg: Config) {
                         assignee: row.assignee,
                         permissions: row.permissions ?? [],
                         createdAt: iso(row.createdAt),
-                        conversations: convs.filter((conv) =>
-                            conv.bindingKey.includes(row.id)
-                        ).length,
-                        acl: acls.filter(
-                            (acl) =>
-                                acl.principalType === 'guild' &&
-                                acl.principalId === row.id
-                        ).length
+                        conversations: convCountByGuild.get(row.id) ?? 0,
+                        acl: aclCountByPrincipal.get(row.id) ?? 0
                     }))
                     .sort((a, b) =>
                         `${a.platform}:${a.id}`.localeCompare(
