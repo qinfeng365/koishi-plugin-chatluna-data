@@ -914,7 +914,52 @@
                                 <span>账号绑定 {{ perm.totals.bindings }}</span>
                                 <span>频道 {{ perm.totals.channels }}</span>
                                 <span>ChatLuna ACL {{ perm.totals.acl }}</span>
+                                <span>提示 {{ perm.totals.issues }}</span>
                             </div>
+                            <div class="permission-guide">
+                                <div>
+                                    <strong>authority</strong>
+                                    <span>数字等级，通常越高代表越强的 Koishi 操作权限。</span>
+                                </div>
+                                <div>
+                                    <strong>permissions</strong>
+                                    <span>字符串权限列表，用于更细粒度地允许或限制操作。</span>
+                                </div>
+                                <div>
+                                    <strong>binding</strong>
+                                    <span>平台账号到 Koishi 用户的映射，是识别真实用户的基础。</span>
+                                </div>
+                                <div>
+                                    <strong>channel</strong>
+                                    <span>频道受理者和频道权限，不等同于 ChatLuna 会话 ACL。</span>
+                                </div>
+                            </div>
+                            <el-table :data="perm.issues" height="220">
+                                <el-table-column label="权限提示" min-width="260">
+                                    <template #default="{ row }">
+                                        <div class="stack">
+                                            <strong>{{ row.target }}</strong>
+                                            <span>{{ row.message }}</span>
+                                        </div>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="级别" width="100">
+                                    <template #default="{ row }">
+                                        <el-tag
+                                            :type="row.level === 'warning' ? 'warning' : 'info'"
+                                            effect="plain"
+                                            size="small"
+                                        >
+                                            {{ row.level === 'warning' ? '注意' : '提示' }}
+                                        </el-tag>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column
+                                    prop="action"
+                                    label="建议"
+                                    min-width="260"
+                                />
+                            </el-table>
                             <el-table :data="filteredPermUsers" height="420">
                                 <el-table-column label="用户" min-width="220">
                                     <template #default="{ row }">
@@ -2932,8 +2977,11 @@ const perm = reactive({
         users: 0,
         bindings: 0,
         channels: 0,
-        acl: 0
+        acl: 0,
+        issues: 0
     },
+    permissions: [] as string[],
+    issues: [] as PermissionIssue[],
     users: [] as PermissionUser[],
     bindings: [] as PermissionBinding[],
     channels: [] as PermissionChannel[]
@@ -3108,6 +3156,7 @@ const assignBindingChoices = computed(() =>
 const permissionChoices = computed(() =>
     Array.from(
         new Set([
+            ...perm.permissions,
             ...perm.users.flatMap((row) => row.permissions),
             ...perm.channels.flatMap((row) => row.permissions),
             'admin',
@@ -3652,6 +3701,8 @@ async function loadMessages(page = 1) {
 async function loadPermissions() {
     const data = await send('chatluna-data/getPermissionOverview')
     perm.totals = data.totals
+    perm.permissions = data.permissions
+    perm.issues = data.issues
     perm.users = data.users
     perm.bindings = data.bindings
     perm.channels = data.channels
@@ -4583,6 +4634,14 @@ interface PermissionChannel {
     acl: number
 }
 
+interface PermissionIssue {
+    type: string
+    level: string
+    target: string
+    message: string
+    action: string
+}
+
 interface Audit {
     id: string
     action: string
@@ -4822,6 +4881,35 @@ dt {
     color: var(--k-text-light);
     background: color-mix(in srgb, var(--k-page-bg), var(--k-side-bg) 36%);
     font-size: 13px;
+}
+
+.permission-guide {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 1px;
+    margin: 0 14px 12px;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--k-color-divider), transparent 28%);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--k-color-divider), transparent 40%);
+}
+
+.permission-guide div {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+    padding: 10px 12px;
+    background: color-mix(in srgb, var(--k-side-bg), var(--k-page-bg) 42%);
+}
+
+.permission-guide strong {
+    color: var(--k-text-dark);
+    font-size: 13px;
+}
+
+.permission-guide span {
+    font-size: 12px;
+    line-height: 1.45;
 }
 
 .stack {
@@ -5168,6 +5256,7 @@ code {
     .form-grid,
     .runtime-grid,
     .defaults-grid,
+    .permission-guide,
     .health-strip {
         grid-template-columns: 1fr;
     }

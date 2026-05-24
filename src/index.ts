@@ -1036,13 +1036,69 @@ export function apply(ctx: Context, cfg: Config) {
                     ).length
                 }
             })
+            const perms = Array.from(
+                new Set([
+                    ...users.flatMap((row) => row.permissions ?? []),
+                    ...channels.flatMap((row) => row.permissions ?? [])
+                ])
+            ).sort()
+            const issues: PermissionIssue[] = [
+                ...userRows
+                    .filter((row) => row.authority >= 4)
+                    .map((row) => ({
+                        level: 'warning' as const,
+                        type: 'high-authority',
+                        target: row.name || String(row.id),
+                        message: `用户 authority=${row.authority}`,
+                        action: '确认是否需要保留高权限。'
+                    })),
+                ...userRows
+                    .filter((row) => row.bindings === 0 && row.authority > 0)
+                    .map((row) => ({
+                        level: 'info' as const,
+                        type: 'user-without-binding',
+                        target: row.name || String(row.id),
+                        message: 'Koishi 用户没有平台账号绑定。',
+                        action: '如果这是历史用户，可以保留；否则检查 binding 表。'
+                    })),
+                ...kBindings
+                    .filter((row) => !users.some((user) => user.id === row.aid))
+                    .map((row) => ({
+                        level: 'warning' as const,
+                        type: 'dangling-binding',
+                        target: `${row.platform}:${row.pid}`,
+                        message: `绑定指向缺失 Koishi 用户: ${row.aid}`,
+                        action: '检查 binding 表或恢复对应 user。'
+                    })),
+                ...channels
+                    .filter((row) => !row.assignee)
+                    .map((row) => ({
+                        level: 'info' as const,
+                        type: 'channel-without-assignee',
+                        target: `${row.platform}:${row.id}`,
+                        message: '频道没有 assignee。',
+                        action: '需要定向机器人受理时填写 assignee。'
+                    })),
+                ...channels
+                    .filter((row) => (row.permissions ?? []).length > 0)
+                    .map((row) => ({
+                        level: 'info' as const,
+                        type: 'channel-permissions',
+                        target: `${row.platform}:${row.id}`,
+                        message: `频道权限: ${(row.permissions ?? []).join(', ')}`,
+                        action: '确认这些权限是否仍然需要。'
+                    }))
+            ]
             return {
                 totals: {
                     users: users.length,
                     bindings: kBindings.length,
                     channels: channels.length,
-                    acl: acls.length
+                    acl: acls.length,
+                    issues: issues.length
                 },
+                permissions: perms,
+                issues,
                 users: userRows.sort((a, b) => b.authority - a.authority),
                 bindings: kBindings
                     .map((row) => {
@@ -2912,6 +2968,14 @@ interface DiagnosticIssue {
 interface HealthIssue {
     type: string
     level: 'danger' | 'warning' | 'info'
+    target: string
+    message: string
+    action: string
+}
+
+interface PermissionIssue {
+    type: string
+    level: 'warning' | 'info'
     target: string
     message: string
     action: string
