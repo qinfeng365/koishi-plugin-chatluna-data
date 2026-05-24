@@ -1,7 +1,7 @@
 {
     "name": "koishi-plugin-chatluna-data",
     "description": "ChatLuna 1.4 数据库优先的 Koishi 管理台",
-    "version": "0.7.1",
+    "version": "0.7.2",
     "homepage": "https://github.com/qinfeng365/koishi-plugin-chatluna-data#readme",
     "repository": {
         "type": "git",
