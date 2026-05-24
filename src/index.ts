@@ -992,6 +992,139 @@ export function apply(ctx: Context, cfg: Config) {
     )
 
     ctx.console.addListener(
+        'chatluna-data/getPermissionOverview',
+        async () => {
+            const [users, kBindings, channels, convs, acls, rules] =
+                await Promise.all([
+                    getRows<KoishiUserRecord>(ctx, 'user'),
+                    getRows<KoishiBindingRecord>(ctx, 'binding'),
+                    getRows<KoishiChannelRecord>(ctx, 'channel'),
+                    getRows<ConversationRecord>(ctx, 'chatluna_conversation'),
+                    getRows<AclRecord>(ctx, 'chatluna_acl'),
+                    getRows<ConstraintRecord>(ctx, 'chatluna_constraint')
+                ])
+            const userRows = users.map((row) => {
+                const refs = kBindings.filter((item) => item.aid === row.id)
+                const ids = refs.map((item) => item.pid)
+                const rows = convs.filter(
+                    (conv) =>
+                        ids.includes(conv.createdBy) ||
+                        ids.some((id) => conv.bindingKey.includes(id))
+                )
+                return {
+                    id: row.id,
+                    name: row.name,
+                    authority: row.authority,
+                    permissions: row.permissions ?? [],
+                    createdAt: iso(row.createdAt),
+                    bindings: refs.length,
+                    platforms: Array.from(
+                        new Set(refs.map((item) => item.platform))
+                    ),
+                    principals: ids,
+                    conversations: rows.length,
+                    acl: acls.filter((acl) => ids.includes(acl.principalId))
+                        .length,
+                    constraints: rules.filter((rule) =>
+                        ids.some((id) =>
+                            [
+                                ...readUserList(rule.users),
+                                ...readUserList(rule.excludeUsers),
+                                rule.createdBy
+                            ].includes(id)
+                        )
+                    ).length
+                }
+            })
+            return {
+                totals: {
+                    users: users.length,
+                    bindings: kBindings.length,
+                    channels: channels.length,
+                    acl: acls.length
+                },
+                users: userRows.sort((a, b) => b.authority - a.authority),
+                bindings: kBindings
+                    .map((row) => {
+                        const user = users.find((item) => item.id === row.aid)
+                        return {
+                            aid: row.aid,
+                            bid: row.bid,
+                            pid: row.pid,
+                            platform: row.platform,
+                            userName: user?.name ?? '',
+                            authority: user?.authority ?? 0,
+                            permissions: user?.permissions ?? []
+                        }
+                    })
+                    .sort((a, b) =>
+                        `${a.platform}:${a.pid}`.localeCompare(
+                            `${b.platform}:${b.pid}`
+                        )
+                    ),
+                channels: channels
+                    .map((row) => ({
+                        id: row.id,
+                        platform: row.platform,
+                        guildId: row.guildId,
+                        assignee: row.assignee,
+                        permissions: row.permissions ?? [],
+                        createdAt: iso(row.createdAt),
+                        conversations: convs.filter((conv) =>
+                            conv.bindingKey.includes(row.id)
+                        ).length,
+                        acl: acls.filter(
+                            (acl) =>
+                                acl.principalType === 'guild' &&
+                                acl.principalId === row.id
+                        ).length
+                    }))
+                    .sort((a, b) =>
+                        `${a.platform}:${a.id}`.localeCompare(
+                            `${b.platform}:${b.id}`
+                        )
+                    )
+            }
+        },
+        { authority: 3 }
+    )
+
+    ctx.console.addListener(
+        'chatluna-data/saveKoishiUserPermission',
+        async (input: SaveKoishiUserInput) => {
+            if (cfg.readonly) throw new Error('readonly mode enabled')
+            await ctx.database.upsert('user', [
+                {
+                    id: input.id,
+                    authority: input.authority,
+                    permissions: readUserList(input.permissions)
+                }
+            ])
+            pushAudit('koishi-user.permission', String(input.id), [], input)
+            return { ok: true }
+        },
+        { authority: 3 }
+    )
+
+    ctx.console.addListener(
+        'chatluna-data/saveKoishiChannelPermission',
+        async (input: SaveKoishiChannelInput) => {
+            if (cfg.readonly) throw new Error('readonly mode enabled')
+            await ctx.database.upsert('channel', [
+                {
+                    id: input.id,
+                    platform: input.platform,
+                    assignee: input.assignee,
+                    permissions: readUserList(input.permissions)
+                }
+            ])
+            pushAudit('koishi-channel.permission', input.id, [], input)
+            return { ok: true }
+        },
+        { authority: 3 }
+    )
+
+    ctx.console.addListener(
         'chatluna-data/saveAcl',
         async (input: SaveAclInput) => {
             if (cfg.readonly) throw new Error('readonly mode enabled')
@@ -2605,6 +2738,19 @@ interface AssignConversationInput {
     setLast?: boolean
 }
 
+interface SaveKoishiUserInput {
+    id: number
+    authority: number
+    permissions?: string | string[] | null
+}
+
+interface SaveKoishiChannelInput {
+    id: string
+    platform: string
+    assignee: string
+    permissions?: string | string[] | null
+}
+
 interface SaveConstraintInput {
     mode: 'save' | 'remove'
     row: ConstraintRecord & { createdAt?: string; updatedAt?: string }
@@ -3045,6 +3191,13 @@ declare module '@koishijs/console' {
         ) => Promise<unknown>
         'chatluna-data/removeMessage': (input: MessageInput) => Promise<unknown>
         'chatluna-data/listAcl': (input?: ListInput) => Promise<unknown>
+        'chatluna-data/getPermissionOverview': () => Promise<unknown>
+        'chatluna-data/saveKoishiUserPermission': (
+            input: SaveKoishiUserInput
+        ) => Promise<unknown>
+        'chatluna-data/saveKoishiChannelPermission': (
+            input: SaveKoishiChannelInput
+        ) => Promise<unknown>
         'chatluna-data/saveAcl': (input: SaveAclInput) => Promise<unknown>
         'chatluna-data/assignConversation': (
             input: AssignConversationInput

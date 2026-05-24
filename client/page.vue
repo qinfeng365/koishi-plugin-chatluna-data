@@ -890,73 +890,267 @@
                 </el-tab-pane>
 
                 <el-tab-pane name="permissions" label="权限">
-                    <section class="panel">
-                        <div class="panel-head wrap">
-                            <h2>ACL</h2>
-                            <div class="filters">
-                                <el-input
-                                    v-model="acl.query"
-                                    :prefix-icon="Search"
-                                    clearable
-                                    size="small"
-                                    placeholder="搜索 ACL"
-                                    @keydown.enter="loadAcl(1)"
-                                />
-                                <el-button
-                                    :icon="Plus"
-                                    :disabled="overview.config.readonly"
-                                    size="small"
-                                    type="primary"
-                                    @click="editAcl()"
-                                >
-                                    新建
-                                </el-button>
+                    <div class="permission-layout">
+                        <section class="panel">
+                            <div class="panel-head wrap">
+                                <div>
+                                    <h2>Koishi 用户权限</h2>
+                                    <p>
+                                        管理 Koishi 原生 authority 与 permissions。
+                                    </p>
+                                </div>
+                                <div class="filters">
+                                    <el-input
+                                        v-model="perm.query"
+                                        :prefix-icon="Search"
+                                        clearable
+                                        size="small"
+                                        placeholder="搜索用户 / 账号 / 权限"
+                                    />
+                                </div>
                             </div>
-                        </div>
-                        <el-table :data="acl.rows" height="560">
-                            <el-table-column label="conversationId" min-width="280">
-                                <template #default="{ row }">
-                                    <code>{{ row.conversationId }}</code>
-                                </template>
-                            </el-table-column>
-                            <el-table-column
-                                prop="principalType"
-                                label="类型"
-                                width="110"
-                            />
-                            <el-table-column label="principalId" min-width="220">
-                                <template #default="{ row }">
-                                    <code>{{ row.principalId }}</code>
-                                </template>
-                            </el-table-column>
-                            <el-table-column
-                                prop="permission"
-                                label="权限"
-                                width="130"
-                            />
-                            <el-table-column label="操作" width="150">
-                                <template #default="{ row }">
+                            <div class="permission-stats">
+                                <span>用户 {{ perm.totals.users }}</span>
+                                <span>账号绑定 {{ perm.totals.bindings }}</span>
+                                <span>频道 {{ perm.totals.channels }}</span>
+                                <span>ChatLuna ACL {{ perm.totals.acl }}</span>
+                            </div>
+                            <el-table :data="filteredPermUsers" height="420">
+                                <el-table-column label="用户" min-width="220">
+                                    <template #default="{ row }">
+                                        <div class="stack">
+                                            <strong>{{ row.name || `用户 ${row.id}` }}</strong>
+                                            <code>{{ row.id }}</code>
+                                        </div>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="authority" width="180">
+                                    <template #default="{ row }">
+                                        <el-input-number
+                                            v-model="row.authority"
+                                            :min="0"
+                                            :max="5"
+                                            size="small"
+                                            class="wide"
+                                            :disabled="overview.config.readonly"
+                                        />
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="permissions" min-width="260">
+                                    <template #default="{ row }">
+                                        <el-select
+                                            v-model="row.permissions"
+                                            multiple
+                                            filterable
+                                            allow-create
+                                            default-first-option
+                                            size="small"
+                                            class="wide"
+                                            :disabled="overview.config.readonly"
+                                            placeholder="添加权限字符串"
+                                        >
+                                            <el-option
+                                                v-for="item in permissionChoices"
+                                                :key="item"
+                                                :label="item"
+                                                :value="item"
+                                            />
+                                        </el-select>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="账号" width="90">
+                                    <template #default="{ row }">
+                                        {{ row.bindings }}
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="操作" width="110">
+                                    <template #default="{ row }">
+                                        <el-button
+                                            size="small"
+                                            type="primary"
+                                            plain
+                                            :disabled="overview.config.readonly"
+                                            @click="saveKoishiUser(row)"
+                                        >
+                                            保存
+                                        </el-button>
+                                    </template>
+                                </el-table-column>
+                            </el-table>
+                        </section>
+
+                        <section class="panel">
+                            <div class="panel-head wrap">
+                                <div>
+                                    <h2>平台账号绑定</h2>
+                                    <p>
+                                        查看 Koishi 用户与平台账号的映射关系。
+                                    </p>
+                                </div>
+                            </div>
+                            <el-table :data="filteredBindings" height="300">
+                                <el-table-column label="平台账号" min-width="260">
+                                    <template #default="{ row }">
+                                        <div class="stack">
+                                            <strong>{{ row.platform }}</strong>
+                                            <code>{{ row.pid }}</code>
+                                        </div>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Koishi 用户" min-width="220">
+                                    <template #default="{ row }">
+                                        <div class="stack">
+                                            <strong>{{ row.userName || '-' }}</strong>
+                                            <code>{{ row.aid }}</code>
+                                        </div>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="authority" width="120">
+                                    <template #default="{ row }">
+                                        {{ row.authority }}
+                                    </template>
+                                </el-table-column>
+                            </el-table>
+                        </section>
+
+                        <section class="panel">
+                            <div class="panel-head wrap">
+                                <div>
+                                    <h2>频道权限</h2>
+                                    <p>
+                                        管理 Koishi channel 的受理者和权限列表。
+                                    </p>
+                                </div>
+                            </div>
+                            <el-table :data="filteredChannels" height="340">
+                                <el-table-column label="频道" min-width="260">
+                                    <template #default="{ row }">
+                                        <div class="stack">
+                                            <strong>{{ row.platform }}</strong>
+                                            <code>{{ row.id }}</code>
+                                        </div>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="assignee" width="160">
+                                    <template #default="{ row }">
+                                        <el-input
+                                            v-model="row.assignee"
+                                            size="small"
+                                            :disabled="overview.config.readonly"
+                                        />
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="permissions" min-width="260">
+                                    <template #default="{ row }">
+                                        <el-select
+                                            v-model="row.permissions"
+                                            multiple
+                                            filterable
+                                            allow-create
+                                            default-first-option
+                                            size="small"
+                                            class="wide"
+                                            :disabled="overview.config.readonly"
+                                            placeholder="添加频道权限"
+                                        >
+                                            <el-option
+                                                v-for="item in permissionChoices"
+                                                :key="item"
+                                                :label="item"
+                                                :value="item"
+                                            />
+                                        </el-select>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="操作" width="110">
+                                    <template #default="{ row }">
+                                        <el-button
+                                            size="small"
+                                            type="primary"
+                                            plain
+                                            :disabled="overview.config.readonly"
+                                            @click="saveKoishiChannel(row)"
+                                        >
+                                            保存
+                                        </el-button>
+                                    </template>
+                                </el-table-column>
+                            </el-table>
+                        </section>
+
+                        <section class="panel">
+                            <div class="panel-head wrap">
+                                <div>
+                                    <h2>ChatLuna 会话授权</h2>
+                                    <p>
+                                        只管理 ChatLuna 会话 ACL，不影响 Koishi authority。
+                                    </p>
+                                </div>
+                                <div class="filters">
+                                    <el-input
+                                        v-model="acl.query"
+                                        :prefix-icon="Search"
+                                        clearable
+                                        size="small"
+                                        placeholder="搜索 ACL"
+                                        @keydown.enter="loadAcl(1)"
+                                    />
                                     <el-button
-                                        link
+                                        :icon="Plus"
+                                        :disabled="overview.config.readonly"
+                                        size="small"
                                         type="primary"
-                                        :disabled="overview.config.readonly"
-                                        @click="editAcl(row)"
+                                        @click="editAcl()"
                                     >
-                                        编辑
+                                        新建
                                     </el-button>
-                                    <el-button
-                                        link
-                                        type="danger"
-                                        :disabled="overview.config.readonly"
-                                        @click="removeAcl(row)"
-                                    >
-                                        删除
-                                    </el-button>
-                                </template>
-                            </el-table-column>
-                        </el-table>
-                        <Pager :data="acl" @change="loadAcl" />
-                    </section>
+                                </div>
+                            </div>
+                            <el-table :data="acl.rows" height="360">
+                                <el-table-column label="conversationId" min-width="280">
+                                    <template #default="{ row }">
+                                        <code>{{ row.conversationId }}</code>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column
+                                    prop="principalType"
+                                    label="类型"
+                                    width="110"
+                                />
+                                <el-table-column label="principalId" min-width="220">
+                                    <template #default="{ row }">
+                                        <code>{{ row.principalId }}</code>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column
+                                    prop="permission"
+                                    label="权限"
+                                    width="130"
+                                />
+                                <el-table-column label="操作" width="150">
+                                    <template #default="{ row }">
+                                        <el-button
+                                            link
+                                            type="primary"
+                                            :disabled="overview.config.readonly"
+                                            @click="editAcl(row)"
+                                        >
+                                            编辑
+                                        </el-button>
+                                        <el-button
+                                            link
+                                            type="danger"
+                                            :disabled="overview.config.readonly"
+                                            @click="removeAcl(row)"
+                                        >
+                                            删除
+                                        </el-button>
+                                    </template>
+                                </el-table-column>
+                            </el-table>
+                            <Pager :data="acl" @change="loadAcl" />
+                        </section>
+                    </div>
                 </el-tab-pane>
 
                 <el-tab-pane name="rules" label="规则">
@@ -2732,6 +2926,18 @@ const messages = reactive({
     role: '',
     user: ''
 })
+const perm = reactive({
+    query: '',
+    totals: {
+        users: 0,
+        bindings: 0,
+        channels: 0,
+        acl: 0
+    },
+    users: [] as PermissionUser[],
+    bindings: [] as PermissionBinding[],
+    channels: [] as PermissionChannel[]
+})
 const acl = reactive(pageState<Acl>())
 const rules = reactive(pageState<Rule>())
 const archives = reactive(pageState<Archive>())
@@ -2899,6 +3105,68 @@ const assignBindingChoices = computed(() =>
         ).values()
     )
 )
+const permissionChoices = computed(() =>
+    Array.from(
+        new Set([
+            ...perm.users.flatMap((row) => row.permissions),
+            ...perm.channels.flatMap((row) => row.permissions),
+            'admin',
+            'manager',
+            'operator'
+        ])
+    ).filter(Boolean)
+)
+const filteredPermUsers = computed(() => {
+    const q = perm.query.trim().toLowerCase()
+    if (!q) return perm.users
+    return perm.users.filter((row) =>
+        [
+            row.id,
+            row.name,
+            row.authority,
+            row.permissions.join('\n'),
+            row.principals.join('\n'),
+            row.platforms.join('\n')
+        ]
+            .join('\n')
+            .toLowerCase()
+            .includes(q)
+    )
+})
+const filteredBindings = computed(() => {
+    const q = perm.query.trim().toLowerCase()
+    if (!q) return perm.bindings
+    return perm.bindings.filter((row) =>
+        [
+            row.aid,
+            row.bid,
+            row.pid,
+            row.platform,
+            row.userName,
+            row.authority,
+            row.permissions.join('\n')
+        ]
+            .join('\n')
+            .toLowerCase()
+            .includes(q)
+    )
+})
+const filteredChannels = computed(() => {
+    const q = perm.query.trim().toLowerCase()
+    if (!q) return perm.channels
+    return perm.channels.filter((row) =>
+        [
+            row.id,
+            row.platform,
+            row.guildId,
+            row.assignee,
+            row.permissions.join('\n')
+        ]
+            .join('\n')
+            .toLowerCase()
+            .includes(q)
+    )
+})
 const resourceJson = computed(() =>
     JSON.stringify(resourceDetail.value?.details ?? {}, null, 2)
 )
@@ -3294,6 +3562,7 @@ async function refresh() {
             loadUsers(users.page),
             loadConversations(convs.page),
             loadMessages(messages.page),
+            loadPermissions(),
             loadAcl(acl.page),
             loadRules(rules.page),
             loadArchives(archives.page),
@@ -3378,6 +3647,14 @@ async function loadMessages(page = 1) {
             user: messages.user
         })
     )
+}
+
+async function loadPermissions() {
+    const data = await send('chatluna-data/getPermissionOverview')
+    perm.totals = data.totals
+    perm.users = data.users
+    perm.bindings = data.bindings
+    perm.channels = data.channels
 }
 
 async function loadAcl(page = 1) {
@@ -3744,6 +4021,27 @@ async function removeAcl(row: Acl) {
     await send('chatluna-data/saveAcl', { mode: 'remove', row })
     ElMessage.success('ACL 已删除')
     await refresh()
+}
+
+async function saveKoishiUser(row: PermissionUser) {
+    await send('chatluna-data/saveKoishiUserPermission', {
+        id: row.id,
+        authority: row.authority,
+        permissions: row.permissions
+    })
+    ElMessage.success('Koishi 用户权限已保存')
+    await loadPermissions()
+}
+
+async function saveKoishiChannel(row: PermissionChannel) {
+    await send('chatluna-data/saveKoishiChannelPermission', {
+        id: row.id,
+        platform: row.platform,
+        assignee: row.assignee,
+        permissions: row.permissions
+    })
+    ElMessage.success('频道权限已保存')
+    await loadPermissions()
 }
 
 function editRule(row?: Rule) {
@@ -4250,6 +4548,41 @@ interface KoishiChannel {
     createdAt?: string
 }
 
+interface PermissionUser {
+    id: number
+    name: string
+    authority: number
+    permissions: string[]
+    createdAt: string
+    bindings: number
+    platforms: string[]
+    principals: string[]
+    conversations: number
+    acl: number
+    constraints: number
+}
+
+interface PermissionBinding {
+    aid: number
+    bid: number
+    pid: string
+    platform: string
+    userName: string
+    authority: number
+    permissions: string[]
+}
+
+interface PermissionChannel {
+    id: string
+    platform: string
+    guildId: string
+    assignee: string
+    permissions: string[]
+    createdAt: string
+    conversations: number
+    acl: number
+}
+
 interface Audit {
     id: string
     action: string
@@ -4451,6 +4784,12 @@ dt {
     flex-wrap: wrap;
 }
 
+.panel-head p {
+    margin-top: 4px;
+    color: var(--k-text-light);
+    font-size: 13px;
+}
+
 .filters {
     flex-wrap: wrap;
     justify-content: flex-end;
@@ -4462,6 +4801,27 @@ dt {
 
 .filters :deep(.el-select) {
     width: 180px;
+}
+
+.permission-layout {
+    display: grid;
+    gap: 14px;
+}
+
+.permission-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 0 14px 12px;
+}
+
+.permission-stats span {
+    padding: 5px 9px;
+    border: 1px solid color-mix(in srgb, var(--k-color-divider), transparent 22%);
+    border-radius: 6px;
+    color: var(--k-text-light);
+    background: color-mix(in srgb, var(--k-page-bg), var(--k-side-bg) 36%);
+    font-size: 13px;
 }
 
 .stack {

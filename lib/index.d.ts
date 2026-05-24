@@ -97,6 +97,17 @@ interface AssignConversationInput {
     setActive?: boolean;
     setLast?: boolean;
 }
+interface SaveKoishiUserInput {
+    id: number;
+    authority: number;
+    permissions?: string | string[] | null;
+}
+interface SaveKoishiChannelInput {
+    id: string;
+    platform: string;
+    assignee: string;
+    permissions?: string | string[] | null;
+}
 interface SaveConstraintInput {
     mode: 'save' | 'remove';
     row: ConstraintRecord & {
@@ -296,6 +307,9 @@ declare module '@koishijs/console' {
         'chatluna-data/saveMessage': (input: SaveMessageInput) => Promise<unknown>;
         'chatluna-data/removeMessage': (input: MessageInput) => Promise<unknown>;
         'chatluna-data/listAcl': (input?: ListInput) => Promise<unknown>;
+        'chatluna-data/getPermissionOverview': () => Promise<unknown>;
+        'chatluna-data/saveKoishiUserPermission': (input: SaveKoishiUserInput) => Promise<unknown>;
+        'chatluna-data/saveKoishiChannelPermission': (input: SaveKoishiChannelInput) => Promise<unknown>;
         'chatluna-data/saveAcl': (input: SaveAclInput) => Promise<unknown>;
         'chatluna-data/assignConversation': (input: AssignConversationInput) => Promise<unknown>;
         'chatluna-data/listConstraints': (input?: ListInput) => Promise<unknown>;
