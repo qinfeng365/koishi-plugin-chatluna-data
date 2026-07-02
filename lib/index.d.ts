@@ -10,14 +10,76 @@ export interface Config {
     maxPreviewRows: number;
     enableArchiveFileOps: boolean;
     enableMessageRepair: boolean;
+    identityRefreshLimitPerBatch: number;
+    identityRefreshInterval: number;
+    inactiveWarningDays: number;
+    enableIdentityLookup: boolean;
+    enableKoishiPermissionCommands: boolean;
 }
 export declare const Config: Schema<Config>;
 export declare function apply(ctx: Context, cfg: Config): void;
+interface IntegrityScanInput {
+    tables?: string[];
+    deep?: boolean;
+    limit?: number;
+}
+interface IntegrityRepairInput {
+    issueIds: string[];
+    action: 'null-field' | 'remove-row' | 'set-value';
+    value?: string;
+    confirm?: boolean;
+}
+interface IntegrityFieldInput {
+    table: string;
+    recordId: string;
+    field: string;
+}
+interface OpsErrorInput {
+    text?: string;
+}
+interface AuditRecord {
+    id: string;
+    action: string;
+    target: string;
+    ids: string;
+    count: number;
+    detail: string;
+    createdAt: Date;
+}
 interface ListInput {
     query?: string;
     page?: number;
     pageSize?: number;
 }
+interface PermissionOverviewInput extends ListInput {
+    platform?: string;
+    inactiveDays?: number;
+}
+interface IdentityRefreshInput {
+    platform: string;
+    id: string;
+    guildId?: string;
+    selfId?: string;
+}
+interface IdentityBatchInput {
+    platform?: string;
+    rows: IdentityRefreshInput[];
+}
+interface PermissionDiagnoseInput {
+    target: string;
+    command?: string;
+    channel?: string;
+}
+type KoishiMaintenanceInput = {
+    type: 'inactive-down';
+    days: number;
+    authority: number;
+    permissions: string[];
+} | {
+    type: 'channels-assign';
+    platform?: string;
+    assignee: string;
+};
 interface UserInput {
     userId: string;
 }
@@ -109,8 +171,9 @@ interface SaveKoishiChannelInput {
     permissions?: string | string[] | null;
 }
 interface KoishiPermissionPlanInput {
-    target: 'all-users' | 'bound-users' | 'chatluna-users' | 'unconfigured-users' | 'channels' | 'channels-empty';
+    target: 'all-users' | 'bound-users' | 'chatluna-users' | 'unconfigured-users' | 'inactive-users' | 'channels' | 'channels-empty';
     platform?: string;
+    inactiveDays?: number;
     authority?: number | null;
     permissionMode: 'add' | 'replace' | 'remove';
     permissions?: string[];
@@ -129,6 +192,12 @@ type OperationInput = {
     targetModel: string;
     status?: string;
     user?: string;
+    includeArchived?: boolean;
+} | {
+    type: 'model-reference-migration';
+    fromModel: string;
+    targetModel: string;
+    scopes: Array<'conversation' | 'constraint-default' | 'constraint-fixed' | 'config-default'>;
     includeArchived?: boolean;
 } | {
     type: 'status-change';
@@ -248,6 +317,31 @@ interface AuditRecord {
     detail: string;
     createdAt: Date;
 }
+interface OpsErrorRecord {
+    id: string;
+    source: string;
+    level: string;
+    logger: string;
+    message: string;
+    kind: string;
+    title: string;
+    severity: string;
+    analysis: string;
+    createdAt: Date;
+}
+interface IdentityRecord {
+    platform: string;
+    id: string;
+    name: string;
+    avatar?: string;
+    source: string;
+    error?: string;
+    updatedAt: Date;
+}
+interface ModelHealthInput extends ListInput {
+    platform?: string;
+    issueType?: string;
+}
 interface ChatLunaRuntimeConfig {
     botNames?: string[];
     isNickname?: boolean;
@@ -295,12 +389,16 @@ interface ChatLunaRuntimeConfig {
 declare module '@koishijs/console' {
     interface Events {
         'chatluna-data/getOverview': () => Promise<unknown>;
+        'chatluna-data/getModelHealth': (input?: ModelHealthInput) => Promise<unknown>;
         'chatluna-data/listProviders': (input?: ListInput) => Promise<unknown>;
         'chatluna-data/getProviderDetail': (input: ProviderInput) => Promise<unknown>;
         'chatluna-data/refreshProvider': (input: ProviderInput) => Promise<unknown>;
         'chatluna-data/listContexts': (input?: ListInput) => Promise<unknown>;
         'chatluna-data/listResources': (input?: ListInput) => Promise<unknown>;
         'chatluna-data/getHealth': () => Promise<unknown>;
+        'chatluna-data/analyzeOpsError': (input?: OpsErrorInput) => Promise<unknown>;
+        'chatluna-data/listOpsErrors': () => Promise<unknown>;
+        'chatluna-data/resetOpsErrors': () => Promise<unknown>;
         'chatluna-data/getConfig': () => Promise<unknown>;
         'chatluna-data/saveConfig': (input: ConfigInput) => Promise<unknown>;
         'chatluna-data/listUsers': (input?: ListInput) => Promise<unknown>;
@@ -315,11 +413,19 @@ declare module '@koishijs/console' {
         'chatluna-data/saveMessage': (input: SaveMessageInput) => Promise<unknown>;
         'chatluna-data/removeMessage': (input: MessageInput) => Promise<unknown>;
         'chatluna-data/listAcl': (input?: ListInput) => Promise<unknown>;
-        'chatluna-data/getPermissionOverview': () => Promise<unknown>;
+        'chatluna-data/getPermissionOverview': (input?: PermissionOverviewInput) => Promise<unknown>;
         'chatluna-data/saveKoishiUserPermission': (input: SaveKoishiUserInput) => Promise<unknown>;
         'chatluna-data/saveKoishiChannelPermission': (input: SaveKoishiChannelInput) => Promise<unknown>;
         'chatluna-data/previewKoishiPermissionPlan': (input: KoishiPermissionPlanInput) => Promise<unknown>;
         'chatluna-data/applyKoishiPermissionPlan': (input: KoishiPermissionPlanInput) => Promise<unknown>;
+        'chatluna-data/listKoishiIdentities': (input?: ListInput) => Promise<unknown>;
+        'chatluna-data/refreshKoishiIdentity': (input: IdentityRefreshInput) => Promise<unknown>;
+        'chatluna-data/refreshKoishiIdentityBatch': (input: IdentityBatchInput) => Promise<unknown>;
+        'chatluna-data/getKoishiPermissionGraph': () => Promise<unknown>;
+        'chatluna-data/diagnoseKoishiPermission': (input: PermissionDiagnoseInput) => Promise<unknown>;
+        'chatluna-data/listKoishiCommands': () => Promise<unknown>;
+        'chatluna-data/previewKoishiMaintenance': (input: KoishiMaintenanceInput) => Promise<unknown>;
+        'chatluna-data/applyKoishiMaintenance': (input: KoishiMaintenanceInput) => Promise<unknown>;
         'chatluna-data/saveAcl': (input: SaveAclInput) => Promise<unknown>;
         'chatluna-data/assignConversation': (input: AssignConversationInput) => Promise<unknown>;
         'chatluna-data/listConstraints': (input?: ListInput) => Promise<unknown>;
@@ -328,6 +434,9 @@ declare module '@koishijs/console' {
         'chatluna-data/previewOperation': (input: OperationInput) => Promise<unknown>;
         'chatluna-data/applyOperation': (input: OperationInput) => Promise<unknown>;
         'chatluna-data/summary': () => Promise<unknown>;
+        'chatluna-data/scanIntegrity': (input?: IntegrityScanInput) => Promise<unknown>;
+        'chatluna-data/repairIntegrity': (input: IntegrityRepairInput) => Promise<unknown>;
+        'chatluna-data/getIntegrityField': (input: IntegrityFieldInput) => Promise<unknown>;
     }
 }
 declare module 'koishi' {
@@ -340,6 +449,8 @@ declare module 'koishi' {
         chatluna_archive: ArchiveRecord;
         chatluna_meta: MetaRecord;
         chatluna_data_audit: AuditRecord;
+        chatluna_data_identity: IdentityRecord;
+        chatluna_data_ops_error: OpsErrorRecord;
     }
 }
 export {};

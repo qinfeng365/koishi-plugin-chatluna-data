@@ -1,4 +1,5 @@
 node_modules/
+/package/
 tsconfig.tsbuildinfo
 *.tgz
 npm-debug.log*
